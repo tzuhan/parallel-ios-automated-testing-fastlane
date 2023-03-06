@@ -1,5 +1,5 @@
 ---
-format_version: '8'
+format_version: '11'
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 project_type: ios
 pipelines:
@@ -24,6 +24,7 @@ stages:
     - tests_3: {}
     - tests_4: {}
     - tests_5: {}
+    - fail_test: {}
   stage_3:
     workflows:
     - deploy: {}
@@ -62,11 +63,34 @@ workflows:
             }\" > \\\n      \"${BITRISE_TEST_RESULT_DIR}/test_${i}/test-info.json\"\n\n
             \   ((i++))\n    \n  fi\ndone"
     - deploy-to-bitrise-io@2: {}
+  fail_test:
+    before_run: []
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -e
+            # make pipelines' return status equal the last command to exit with a non-zero status, or zero if all commands exit successfully
+            set -o pipefail
+            # debug log
+            set -x
+
+            # write your script here
+            echo "Hello World!"
+
+            # or run a script from your repository, like:
+            # bash ./path/to/script.sh
+            # not just bash, e.g.:
+            # ruby ./path/to/script.rb
+
+            cp test test2
   pipeline_multiple_destinations:
     steps:
     - activate-ssh-key@4:
         run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
-    - git-clone@6: {}
+    - git-clone@8.0: {}
     - cocoapods-install@2: {}
     - script@1.2:
         title: Build for Testing
@@ -102,6 +126,65 @@ workflows:
                 "$BITRISE_SOURCE_DIR/Notes.xcworkspace" \
                 "$BITRISE_SOURCE_DIR/Notes.xcodeproj" \
                 "$BITRISE_SOURCE_DIR/Notes.xctestplan"
+    - deploy-to-bitrise-io@2:
+        inputs:
+        - deploy_path: "${BITRISE_SOURCE_DIR}/DerivedData.zip"
+    before_run: []
+  pipeline_test_shards:
+    steps:
+    - activate-ssh-key@4:
+        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+    - git-clone@8.0: {}
+    - cocoapods-install@2: {}
+    - git::https://github.com/DamienBitrise/bitrise-test-plan-sharder.git@master:
+        title: Bitrise Test Plan Sharder
+        inputs:
+        - xcode_project: Notes.xcodeproj
+        - target: NotesUITests
+        - shards: '5'
+        - scheme: Notes
+        - test_plan: Notes.xctestplan
+        - debug_mode: 'true'
+        - test_path: ''
+        - file_type: ".swift"
+    - script@1.2:
+        title: Build for Testing
+        inputs:
+        - content: |+
+            set -euxo pipefail
+            echo "-- build-for-testing --"
+
+            mkdir DerivedData
+
+            xcodebuild \
+            -scheme "Notes" \
+            -workspace "Notes.xcworkspace" \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=iPhone 8,OS=latest" \
+            -derivedDataPath "${BITRISE_SOURCE_DIR}/DerivedData" \
+            build-for-testing
+
+    - script@1.2:
+        title: Compress Derived Data
+        is_always_run: true
+        inputs:
+        - content: |
+            set -euxo pipefail
+            echo "-- compress --"
+
+            exec zip -0 -qr \
+                "${BITRISE_SOURCE_DIR}/DerivedData.zip" \
+                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Debug-iphonesimulator/Notes.app" \
+                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Debug-iphonesimulator/NotesUITests-Runner.app" \
+                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Notes_Notes_iphonesimulator13.5-x86_64.xctestrun" \
+                "$BITRISE_SOURCE_DIR/Notes.xcworkspace" \
+                "$BITRISE_SOURCE_DIR/Notes.xcodeproj" \
+                "$BITRISE_SOURCE_DIR/Notes.xctestplan" \
+                "$BITRISE_SOURCE_DIR/TestShard_0.xctestplan" \
+                "$BITRISE_SOURCE_DIR/TestShard_1.xctestplan" \
+                "$BITRISE_SOURCE_DIR/TestShard_2.xctestplan" \
+                "$BITRISE_SOURCE_DIR/TestShard_3.xctestplan" \
+                "$BITRISE_SOURCE_DIR/TestShard_4.xctestplan"
     - deploy-to-bitrise-io@2:
         inputs:
         - deploy_path: "${BITRISE_SOURCE_DIR}/DerivedData.zip"
@@ -546,65 +629,6 @@ workflows:
                 "/Users/vagrant/git/xcodebuild.xcresult"
     - deploy-to-bitrise-io@2: {}
     before_run: []
-  pipeline_test_shards:
-    steps:
-    - activate-ssh-key@4:
-        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
-    - git-clone@6: {}
-    - cocoapods-install@2: {}
-    - git::https://github.com/DamienBitrise/bitrise-test-plan-sharder.git@master:
-        title: Bitrise Test Plan Sharder
-        inputs:
-        - xcode_project: Notes.xcodeproj
-        - target: NotesUITests
-        - shards: '5'
-        - scheme: Notes
-        - test_plan: Notes.xctestplan
-        - debug_mode: 'true'
-        - test_path: ''
-        - file_type: ".swift"
-    - script@1.2:
-        title: Build for Testing
-        inputs:
-        - content: |+
-            set -euxo pipefail
-            echo "-- build-for-testing --"
-
-            mkdir DerivedData
-
-            xcodebuild \
-            -scheme "Notes" \
-            -workspace "Notes.xcworkspace" \
-            -sdk iphonesimulator \
-            -destination "platform=iOS Simulator,name=iPhone 8,OS=latest" \
-            -derivedDataPath "${BITRISE_SOURCE_DIR}/DerivedData" \
-            build-for-testing
-
-    - script@1.2:
-        title: Compress Derived Data
-        is_always_run: true
-        inputs:
-        - content: |
-            set -euxo pipefail
-            echo "-- compress --"
-
-            exec zip -0 -qr \
-                "${BITRISE_SOURCE_DIR}/DerivedData.zip" \
-                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Debug-iphonesimulator/Notes.app" \
-                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Debug-iphonesimulator/NotesUITests-Runner.app" \
-                "$BITRISE_SOURCE_DIR/DerivedData/Build/Products/Notes_Notes_iphonesimulator13.5-x86_64.xctestrun" \
-                "$BITRISE_SOURCE_DIR/Notes.xcworkspace" \
-                "$BITRISE_SOURCE_DIR/Notes.xcodeproj" \
-                "$BITRISE_SOURCE_DIR/Notes.xctestplan" \
-                "$BITRISE_SOURCE_DIR/TestShard_0.xctestplan" \
-                "$BITRISE_SOURCE_DIR/TestShard_1.xctestplan" \
-                "$BITRISE_SOURCE_DIR/TestShard_2.xctestplan" \
-                "$BITRISE_SOURCE_DIR/TestShard_3.xctestplan" \
-                "$BITRISE_SOURCE_DIR/TestShard_4.xctestplan"
-    - deploy-to-bitrise-io@2:
-        inputs:
-        - deploy_path: "${BITRISE_SOURCE_DIR}/DerivedData.zip"
-    before_run: []
 app:
   envs:
   - opts:
@@ -622,6 +646,16 @@ app:
 meta:
   bitrise.io:
     stack: osx-xcode-13.1.x
-    machine_type_id: g2.4core
-    #machine_type_id: g2-m1.8core
-    
+    machine_type_id: g2-m1.4core
+trigger_map:
+- push_branch: master
+  workflow: deploy
+- push_branch: develop*
+  pipeline: pipeline_multiple_shards
+- push_branch: test*
+  pipeline: pipeline_multiple_devices
+- tag: release*hotfix
+  workflow: tests_2
+- tag: release*
+  workflow: tests_1
+
